@@ -16,7 +16,7 @@ def export_geometry(output: Path,  limit: int | None = None, events: int | None 
     geometry = []
 
     for trace in traces:
-        trace_id = f"{trace.trace_kind}::seed-{trace.seed}"
+        trace_id = f"{trace.trace_kind}:seed-{trace.seed}"
         trace_samples = samples[samples.trace_id == trace_id]
         teacher = dict(zip(trace_samples.step, trace_samples.teacher_action))
 
@@ -36,11 +36,11 @@ def export_geometry(output: Path,  limit: int | None = None, events: int | None 
             if has_label and not obs.reduction_needed:
                 raise RuntimeError(f"{trace_id}, step {step}: teacher label but no reduction needed")
 
-            if obs.reduction_needed and step in teacher:
+            print(step, ", reduction needed:", obs.reduction_needed,
+                  "gens:", obs.dynamic.generators.shape,
+                  "teacher:", teacher.get(step))
 
-                print(step, "needed:", obs.reduction_needed,
-                      "gens:", obs.dynamic.generators.shape,
-                      "teacher:", teacher.get(step))
+            if obs.reduction_needed and step in teacher:
 
                 geometry.append({
                     "trace_id": trace_id, "step": step,
