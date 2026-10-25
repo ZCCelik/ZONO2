@@ -18,9 +18,17 @@ def export_geometry(output: Path) -> None:
 
         session = learning.MonitorSession(trace, budget=task.budget)
 
-        while not session.done:
+        # Stop before the last event like the teacher so that the last event has no label
+        while session.index < len(trace.events) - 1:
             obs = session.observe(geometry=True)
             step = session.index
+
+            has_label = session.teacher_action is not None
+
+            if obs.reduction_needed and not has_label:
+                raise RuntimeError(f"{trace_id}, step {step}: reduction needed but teacher has no label")
+            if has_label and not obs.reduction_needed:
+                raise RuntimeError(f"{trace_id}, step {step}: teacher label but no reduction needed")
 
             if obs.reduction_needed and step in teacher:
                 geometry.append({
@@ -31,13 +39,15 @@ def export_geometry(output: Path) -> None:
                 })
                 action = MPC_ACTION_NAMES.index(teacher[step])
             else:
-                action = 0
+                action = 0  # ignored under budget
 
             record = session.step(action)
 
-            if step in teacher and record["executed_action"] != teacher[step]:
-                print("left the teacher's path at step", step, record)
-                break
+            if teacher[step] is not None and record["executed_action"] != teacher[step]:
+                raise RuntimeError(
+                    f"{trace_id}, step {step}: teacher chose {teacher[step]} but "
+                    f"monitor ran {record['executed_action']} ({record['override_reason']})"
+                )
 
 
 if __name__ == "__main__":
