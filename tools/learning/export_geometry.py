@@ -1,4 +1,4 @@
-
+"""Replay the starter traces and save the zonotope geometry retrieved by teacher action"""
 
 import numpy as np
 import pandas as pd
@@ -11,17 +11,44 @@ from pzr.learning.monitor import Zonotope
 from pzr.learning.tasks import Task
 from pzr.rtlola.actions import MPC_ACTION_NAMES
 from pzr.rtlola.scenarios import RtlolaTrace
+from pzr.artifact_io import write_csv_atomic, write_json_atomic
+
 
 @dataclass(frozen=True)
-class Geometry:
+class GeometrySample:
     trace_id: str
+    sample_id: str
     step: int
     teacher_action: str
     features: np.ndarray
-    dynamic: Zonotope | None = None
-    total: Zonotope | None = None
+    dynamic: Zonotope
+    total: Zonotope
 
-def export_geometry(output: Path,  limit: int | None = None, events: int | None = None) -> None:
+
+@dataclass(frozen=True)
+class GeometrySampleDataset:
+    """Pre-event zonotopes at teacher decisions, aligned with the starter samples."""
+
+    samples: tuple[GeometrySample, ...]
+
+    def __post_init__(self) -> None:
+        ids = [g.sample_id for g in self.samples]
+        if len(set(ids)) != len(ids):
+            raise ValueError("sample identifiers must be unique")
+        for g in self.samples:
+            if g.dynamic.center.shape != g.total.center.shape:
+                raise ValueError(f"{g.sample_id}: dynamic and total dimensions differ")
+
+    @property
+    def num_samples(self) -> int:
+        return len(self.samples)
+
+    @property
+    def features(self) -> np.ndarray:
+        return np.stack([g.features for g in self.samples])   # (N, 15) when you need the block
+
+# TODO:: refuse overwrite → replay + feature check → save_geometry
+def export_geometry(limit: int | None = None, events: int | None = None) -> list[GeometrySample]:
     """Replay the starter traces with the teacher's actions
     and save the zonotopes in a list of Geometry objects."""
 
@@ -39,11 +66,12 @@ def export_geometry(output: Path,  limit: int | None = None, events: int | None 
         geometry.extend(replay_trace(trace, samples, task))
 
     print("collected", len(geometry), "samples from", len(traces), "traces")
+    return geometry
 
 
 def replay_trace(trace: RtlolaTrace,
                  samples: pd.DataFrame,
-                 task: Task) -> list[Geometry] :
+                 task: Task) -> list[GeometrySample] :
 
     trace_id = f"{trace.trace_kind}:seed-{trace.seed}"
     trace_samples = samples[samples.trace_id == trace_id]
@@ -69,13 +97,19 @@ def replay_trace(trace: RtlolaTrace,
               "gens:", obs.dynamic.generators.shape,
               "teacher:", teacher.get(step))
 
+        # Binding geometry with the sample_ids.
+        # Can't use task.dataset.sample_ids because it contains all the traces together in one list
+        trace_id = f"{trace_id}:teacher:budget-{task.budget}:step-{step}"
+        sample_id_by_step = dict(zip(trace_samples.step, trace_samples.sample_id))
+
         if obs.reduction_needed and step in teacher:
             geometry.append(
-                Geometry(trace_id, step,
-                teacher[step],
-                obs.features,
-                obs.dynamic, obs.total
-                )
+                GeometrySample(obs.trace_id,
+                               sample_id_by_step[step],
+                               step,
+                               teacher[step],
+                               obs.features,
+                               obs.dynamic, obs.total)
             )
             action = MPC_ACTION_NAMES.index(teacher[step])
         else:
