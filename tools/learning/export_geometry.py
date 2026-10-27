@@ -13,6 +13,7 @@ from pzr.rtlola.actions import MPC_ACTION_NAMES
 from pzr.rtlola.scenarios import RtlolaTrace
 from pzr.artifact_io import write_csv_atomic, write_json_atomic
 
+GEOMETRY_SCHEMA = "pzr.starter-geometry.v1"
 
 @dataclass(frozen=True)
 class GeometrySample:
@@ -39,6 +40,9 @@ class GeometrySampleDataset:
             if g.dynamic.center.shape != g.total.center.shape:
                 raise ValueError(f"{g.sample_id}: dynamic and total dimensions differ")
 
+    def __len__(self):
+        return len(self.samples)
+
     @property
     def num_samples(self) -> int:
         return len(self.samples)
@@ -47,10 +51,12 @@ class GeometrySampleDataset:
     def features(self) -> np.ndarray:
         return np.stack([g.features for g in self.samples])   # (N, 15) when you need the block
 
-# TODO:: refuse overwrite → replay + feature check → save_geometry
-def export_geometry(limit: int | None = None, events: int | None = None) -> list[GeometrySample]:
-    """Replay the starter traces with the teacher's actions
-    and save the zonotopes in a list of Geometry objects."""
+
+def export_geometry(output: Path, limit: int | None = None, events: int | None = None) -> None:
+
+    if output.exists():
+        raise FileExistsError(f"Refusing to overwrite: {output}")
+    output.mkdir(parents=True)
 
     task = learning.load_task("robot_arm", bundle="starter", budget=40)
 
@@ -65,8 +71,30 @@ def export_geometry(limit: int | None = None, events: int | None = None) -> list
     for trace in traces:
         geometry.extend(replay_trace(trace, samples, task))
 
-    print("collected", len(geometry), "samples from", len(traces), "traces")
-    return geometry
+    save_geometry(GeometrySampleDataset(tuple(geometry)), output)
+
+
+def save_geometry(dataset:GeometrySampleDataset, output: Path) -> None:
+    """Write geometry.npz, index.csv and manifest.json for the exported zonotopes."""
+    temporary = output / ".geometry.npz.tmp"
+    with temporary.open("wb") as handle:
+        np.savez_compressed(handle, sample_ids=..., dynamic_values=..., dynamic_shapes=...,
+                            total_values=..., total_shapes=...)
+    temporary.replace(output / "geometry.npz")
+
+    geometry_metadata = pd.DataFrame({
+        "sample_id": [s.sample_id for s in dataset.samples],
+        "trace_id": [s.trace_id for s in dataset.samples],
+        "step": [s.step for s in dataset.samples],
+        "teacher_action": [s.teacher_action for s in dataset.samples],
+        "dynamic_rows": [s.dynamic.generators.shape[0] for s in dataset.samples],
+        "dynamic_generators": [s.dynamic.generators.shape[1] for s in dataset.samples],
+        "total_generators": [s.total.generators.shape[1] for s in dataset.samples],
+    })
+    write_csv_atomic(geometry_metadata, output / "samples.csv")
+
+    write_json_atomic({"schema": GEOMETRY_SCHEMA, "num_samples": len(dataset)},
+                      output / "manifest.json")
 
 
 def replay_trace(trace: RtlolaTrace,
@@ -77,8 +105,6 @@ def replay_trace(trace: RtlolaTrace,
     trace_samples = samples[samples.trace_id == trace_id]
     teacher = dict(zip(trace_samples.step, trace_samples.teacher_action))
     geometry = []
-
-    print(trace_id, "samples:", len(trace_samples), "labels:", len(teacher))
 
     session = learning.MonitorSession(trace, budget=task.budget)
 
@@ -93,18 +119,13 @@ def replay_trace(trace: RtlolaTrace,
         if has_label and not obs.reduction_needed:
             raise RuntimeError(f"{trace_id}, step {step}: teacher label but no reduction needed")
 
-        print(step, ", reduction needed:", obs.reduction_needed,
-              "gens:", obs.dynamic.generators.shape,
-              "teacher:", teacher.get(step))
-
         # Binding geometry with the sample_ids.
         # Can't use task.dataset.sample_ids because it contains all the traces together in one list
-        trace_id = f"{trace_id}:teacher:budget-{task.budget}:step-{step}"
         sample_id_by_step = dict(zip(trace_samples.step, trace_samples.sample_id))
 
         if obs.reduction_needed and step in teacher:
             geometry.append(
-                GeometrySample(obs.trace_id,
+                GeometrySample(trace_id,
                                sample_id_by_step[step],
                                step,
                                teacher[step],
