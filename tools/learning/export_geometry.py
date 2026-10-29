@@ -78,8 +78,16 @@ def save_geometry(dataset:GeometrySampleDataset, output: Path) -> None:
     """Write geometry.npz, index.csv and manifest.json for the exported zonotopes."""
     temporary = output / ".geometry.npz.tmp"
     with temporary.open("wb") as handle:
-        np.savez_compressed(handle, sample_ids=..., dynamic_values=..., dynamic_shapes=...,
-                            total_values=..., total_shapes=...)
+        np.savez_compressed(handle,
+                            sample_ids=np.asarray([s.sample_id for s in dataset.samples]),
+                            features=dataset.features,
+                            dynamic_centers=np.stack([s.dynamic.center for s in dataset.samples]),
+                            dynamic_generators=np.concatenate([s.dynamic.generators for s in dataset.samples], axis=1),
+                            dynamic_offsets=np.cumsum([0] + [s.dynamic.generators.shape[1] for s in dataset.samples]),
+                            total_centers=np.stack([s.total.center for s in dataset.samples]),
+                            total_generators=np.concatenate([s.total.generators for s in dataset.samples], axis=1),
+                            total_offsets=np.cumsum([0] + [s.total.generators.shape[1] for s in dataset.samples]),
+                            )
     temporary.replace(output / "geometry.npz")
 
     geometry_metadata = pd.DataFrame({
@@ -155,4 +163,10 @@ if __name__ == "__main__":
     parser.add_argument("--events", type=int, default=None)
     args = parser.parse_args()
     # debug config --limit 1 --events 10
-    export_geometry(args.output, limit=args.limit, events=args.events)
+    # export_geometry(args.output, limit=args.limit, events=args.events)
+    REPO = Path(__file__).resolve().parents[2]  # adjust the number to where your script sits
+    directory = REPO / "tools" / "learning" / "geometry.json"
+
+    with np.load(directory / "geometry.npz") as arrays:
+        print(arrays.files)
+        print(arrays["features"])
