@@ -27,15 +27,6 @@ COORDINATE_FEATURE_NAMES = (
     "max_coefficient_share",   # largest |G[i, j]| / dynamic_radius
     "is_active",               # row has any nonzero entry
 )
-GENERATOR_GROUPS = {
-    "size":      ("l1_norm", "l2_norm", "inf_norm", "relative_l2_norm"),
-    "shape":     ("girard_score", "off_axis_fraction", "is_axis_aligned", "row_support_fraction"),
-    "coupling":  ("max_abs_cosine",),
-}
-COORDINATE_GROUPS = {
-    "width":     ("dynamic_radius", "total_radius", "width_share", "max_coefficient_share"),
-    "slack":     ("slack_fraction",),
-}
 
 
 @dataclass(frozen=True)
