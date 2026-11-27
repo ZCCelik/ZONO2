@@ -14,9 +14,22 @@ GENERATOR_FEATURE_NAMES = (
     "relative_l2_norm",        # l2_norm / mean active l2_norm
     "row_support_fraction",    # share of rows with a nonzero entry
     "is_axis_aligned",         # exactly one nonzero entry
-    "is_active",               # l2_norm > atol
+    "is_active",               # at least one entry > atol
     "max_abs_cosine",          # highest |cos| with any other generator
 )
+
+
+COORDINATE_FEATURE_NAMES = (
+    "center",
+    "dynamic_radius",          # sum of |G[i, :]| over dynamic generators
+    "total_radius",            # same over the total zonotope
+    "slack_fraction",          # (total_radius - dynamic_radius) / total_radius
+    "width_share",             # dynamic_radius / sum of all dynamic radi
+    "generator_support_fraction",  # share of active dynamic generators with |G[i, j]| > atol
+    "max_coefficient_share",   # largest |G[i, j]| / dynamic_radius
+    "is_active",               # row has any nonzero entry
+)
+
 
 @dataclass(frozen=True)
 class ZonotopeGraph:
@@ -27,7 +40,7 @@ class ZonotopeGraph:
     edge_weight: NDArray[np.float32]
 
 
-def get_generator_features(zonotope: Zonotope, budget: int, atol: float = 1e-12) -> NDArray[np.float32]:
+def get_generator_features(zonotope: Zonotope, atol: float = 1e-12) -> NDArray[np.float32]:
     """One row per generator (column of G); columns follow GENERATOR_FEATURE_NAMES."""
     generators = zonotope.generators  # shape (d, m), columns are generators
     num_rows, num_generators = generators.shape
@@ -38,13 +51,13 @@ def get_generator_features(zonotope: Zonotope, budget: int, atol: float = 1e-12)
     l2_norm = np.linalg.norm(generators, axis=0)
     inf_norm = absolute.max(axis=0)
     girard_score = l1_norm - inf_norm
-    active = l2_norm > atol
+    nonzero_per_generator = np.count_nonzero(absolute > atol, axis=0)
+    active = nonzero_per_generator > 0
     off_axis_fraction = np.zeros(num_generators)
     off_axis_fraction[active] = girard_score[active] / l1_norm[active]
     relative_l2_norm = np.zeros(num_generators)
     if active.any():
         relative_l2_norm[active] = l2_norm[active] / l2_norm[active].mean()
-    nonzero_per_generator = np.count_nonzero(absolute > atol, axis=0)
     row_support_fraction = nonzero_per_generator / num_rows
     is_axis_aligned = nonzero_per_generator == 1
     max_abs_cosine = np.zeros(num_generators)
@@ -66,5 +79,39 @@ def get_generator_features(zonotope: Zonotope, budget: int, atol: float = 1e-12)
         is_axis_aligned,
         active,
         max_abs_cosine,
+    ], axis=1)
+    return features.astype(np.float32)
+
+
+def get_coordinate_features(dynamic: Zonotope, total: Zonotope, atol: float = 1e-12):
+    d = dynamic.generators.shape[0]
+    dynamic_radius = np.abs(dynamic.generators).sum(axis=1)
+    total_radius = np.abs(total.generators).sum(axis=1)
+    slack_fraction = np.zeros(dynamic_radius.shape)
+    has_total = total_radius > atol
+    slack_fraction[has_total] = (total_radius[has_total] - dynamic_radius[has_total]) / total_radius[has_total]
+    width_share = np.zeros(d)
+    sum_all_dynamic_radius = np.sum(dynamic_radius)
+    if sum_all_dynamic_radius > atol:
+        width_share = dynamic_radius / sum_all_dynamic_radius
+    touching = np.abs(dynamic.generators) > atol
+    nonzero_per_generator = touching.sum(axis=0)
+    active_generators = nonzero_per_generator > 0
+    generator_support_fraction = np.zeros(d)
+    if active_generators.any():
+        generator_support_fraction = touching.sum(axis=1) / active_generators.sum()
+    active_rows = dynamic_radius > atol
+    max_coefficient_share = np.zeros(d)
+    if active_rows.any():
+        max_coefficient_share[active_rows] = np.abs(dynamic.generators[active_rows]).max(axis=1) / dynamic_radius[active_rows]
+    features = np.stack([
+        dynamic.center,
+        dynamic_radius,
+        total_radius,
+        slack_fraction,
+        width_share,
+        generator_support_fraction,
+        max_coefficient_share,
+        active_rows,
     ], axis=1)
     return features.astype(np.float32)
