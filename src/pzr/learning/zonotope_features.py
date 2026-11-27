@@ -14,16 +14,18 @@ GENERATOR_FEATURE_NAMES = (
     "relative_l2_norm",        # l2_norm / mean active l2_norm
     "row_support_fraction",    # share of rows with a nonzero entry
     "is_axis_aligned",         # exactly one nonzero entry
-    "is_active",               # l2_norm > atol
+    "is_active",               # at least one entry > atol
     "max_abs_cosine",          # highest |cos| with any other generator
 )
+
+
 COORDINATE_FEATURE_NAMES = (
     "center",
     "dynamic_radius",          # sum of |G[i, :]| over dynamic generators
     "total_radius",            # same over the total zonotope
     "slack_fraction",          # (total_radius - dynamic_radius) / total_radius
-    "width_share",             # dynamic_radius / sum of all dynamic radii
-    "generator_support_fraction",  # share of generators touching this row
+    "width_share",             # dynamic_radius / sum of all dynamic radi
+    "generator_support_fraction",  # share of active dynamic generators with |G[i, j]| > atol
     "max_coefficient_share",   # largest |G[i, j]| / dynamic_radius
     "is_active",               # row has any nonzero entry
 )
